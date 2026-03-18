@@ -1,1 +1,1 @@
-# ai-food-audio-viz
+# ai-food-aviz-web-interface
