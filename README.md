@@ -1,1 +1,1 @@
-# ai-food-aviz-web-interface
+# ai-food-web-interface
