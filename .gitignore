@@ -1,1 +1,9 @@
+# ignore mac files and test folders
+.DS_Store
+__test__/
 
+# ignore node modules
+node_modules/
+
+# ignore environment variable files
+.env
