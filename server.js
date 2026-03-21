@@ -20,6 +20,7 @@ const MIME_TYPES = {
   ".jpeg": "image/jpeg",
   ".gif": "image/gif",
   ".webp": "image/webp",
+  ".mp3": "audio/mpeg",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
 };
@@ -209,6 +210,12 @@ const server = http.createServer(async (req, res) => {
     if (method === "GET" && url === "/api/pairs") {
       const pairs = await buildImageDepthPairs();
       sendJson(res, 200, { pairs });
+      return;
+    }
+
+    if (method === "GET" && url === "/api/images") {
+      const imageFiles = await readImageFiles(IMAGES_DIR);
+      sendJson(res, 200, { images: imageFiles });
       return;
     }
 

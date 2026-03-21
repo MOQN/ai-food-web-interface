@@ -125,6 +125,7 @@
     <div id="app"></div>
 
     <div class="panel">
+      <!-- <div class="panel" style="display: none"> -->
       <h1 class="title">Depth Map Point Cloud</h1>
       <p class="muted">
         Auto-pairs files from images/ and maps/, then renders the selected pair.
@@ -316,6 +317,32 @@
       </div>
 
       <div class="row">
+        <label for="beatDepthBoost">Beat Depth</label>
+        <input
+          id="beatDepthBoost"
+          type="range"
+          min="0"
+          max="180"
+          step="1"
+          value="64"
+        />
+        <span class="value" id="beatDepthBoostVal">64</span>
+      </div>
+
+      <div class="row">
+        <label for="beatBassHighHz">Beat High Hz</label>
+        <input
+          id="beatBassHighHz"
+          type="range"
+          min="80"
+          max="520"
+          step="5"
+          value="180"
+        />
+        <span class="value" id="beatBassHighHzVal">180</span>
+      </div>
+
+      <div class="row">
         <label for="hoverSoftness">Edge Softness</label>
         <input
           id="hoverSoftness"
@@ -393,6 +420,8 @@
         edgeDropout: 0.28,
         hoverRevealMode: false,
         hoverRadius: 120,
+        beatDepthBoost: 64,
+        beatBassHighHz: 180,
         hoverSoftness: 0.55,
         revealRiseSpeed: 0.28,
         revealFallSpeed: 0.14,
@@ -416,6 +445,8 @@
         "edgeDropout",
         "hoverRevealMode",
         "hoverRadius",
+        "beatDepthBoost",
+        "beatBassHighHz",
         "hoverSoftness",
         "revealRiseSpeed",
         "revealFallSpeed",
@@ -467,6 +498,31 @@
       const pointerNdc = new THREE.Vector2(2, 2);
       let pointerInside = false;
       let pointerPressed = false;
+      const OUTGOING_SCATTER_MS = 620;
+      const OUTGOING_SCATTER_DISTANCE = 240;
+      const INCOMING_FLOAT_MS = 980;
+      const INCOMING_START_Z_OFFSET = 680;
+      const BASE_POINT_OPACITY = 0.96;
+      let outgoingCloud = null;
+      let incomingTransition = null;
+      let pairSwitchToken = 0;
+      const cloudAudio = new Audio();
+      cloudAudio.loop = true;
+      cloudAudio.preload = "auto";
+      let cloudAudioToken = 0;
+      let audioContext = null;
+      let audioSourceNode = null;
+      let audioAnalyser = null;
+      let audioFreqData = null;
+      let prevBassEnergy = 0;
+      let fluxAverage = 0;
+      let energyAverage = 0;
+      let beatPulse = 0;
+      let beatLastMs = 0;
+      let beatUpdateLastMs = performance.now();
+      const BEAT_BASS_LOW_HZ = 30;
+      const BEAT_MIN_INTERVAL_MS = 125;
+      const BEAT_DECAY_PER_SEC = 5.8;
 
       function setError(message) {
         errorEl.textContent = message || "";
@@ -478,6 +534,150 @@
 
       function setPairCount() {
         pairCountEl.textContent = String(pairedAssets.length);
+      }
+
+      function stopCloudAudio() {
+        cloudAudio.pause();
+        cloudAudio.currentTime = 0;
+        cloudAudio.removeAttribute("src");
+        cloudAudio.load();
+      }
+
+      function extractBaseNameWithoutExt(pathValue) {
+        const normalized = String(pathValue || "")
+          .replace(/\\/g, "/")
+          .split("/")
+          .pop();
+        if (!normalized) return "";
+        return normalized.replace(/\.[^/.]+$/, "");
+      }
+
+      function ensureAudioAnalysisGraph() {
+        if (audioAnalyser && audioFreqData) {
+          return;
+        }
+
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) {
+          return;
+        }
+
+        if (!audioContext) {
+          audioContext = new AudioCtx();
+        }
+
+        if (!audioSourceNode) {
+          audioSourceNode = audioContext.createMediaElementSource(cloudAudio);
+        }
+
+        if (!audioAnalyser) {
+          audioAnalyser = audioContext.createAnalyser();
+          audioAnalyser.fftSize = 1024;
+          audioAnalyser.smoothingTimeConstant = 0.28;
+          audioSourceNode.connect(audioAnalyser);
+          audioAnalyser.connect(audioContext.destination);
+        }
+
+        audioFreqData = new Uint8Array(audioAnalyser.frequencyBinCount);
+      }
+
+      function updateBeatPulse(nowMs) {
+        const dtSec = Math.max(0, (nowMs - beatUpdateLastMs) * 0.001);
+        beatUpdateLastMs = nowMs;
+        beatPulse *= Math.exp(-BEAT_DECAY_PER_SEC * dtSec);
+
+        if (
+          !audioAnalyser ||
+          !audioFreqData ||
+          cloudAudio.paused ||
+          cloudAudio.ended
+        ) {
+          return beatPulse;
+        }
+
+        audioAnalyser.getByteFrequencyData(audioFreqData);
+
+        const sampleRate = audioContext ? audioContext.sampleRate : 44100;
+        const nyquist = sampleRate * 0.5;
+        const hzPerBin = nyquist / audioFreqData.length;
+
+        let bassSum = 0;
+        let bassCount = 0;
+        const bassHighHz = Math.max(
+          BEAT_BASS_LOW_HZ + 10,
+          Number(params.beatBassHighHz) || 180,
+        );
+        for (let i = 0; i < audioFreqData.length; i += 1) {
+          const freq = i * hzPerBin;
+          if (freq < BEAT_BASS_LOW_HZ || freq > bassHighHz) continue;
+          bassSum += audioFreqData[i];
+          bassCount += 1;
+        }
+
+        if (bassCount <= 0) {
+          return beatPulse;
+        }
+
+        const bassEnergy = bassSum / bassCount / 255;
+        const flux = Math.max(0, bassEnergy - prevBassEnergy);
+        prevBassEnergy = bassEnergy;
+
+        energyAverage = energyAverage * 0.9 + bassEnergy * 0.1;
+        fluxAverage = fluxAverage * 0.88 + flux * 0.12;
+        const dynamicThreshold = fluxAverage * 1.45 + 0.012;
+        const isBeat =
+          flux > dynamicThreshold &&
+          bassEnergy > energyAverage * 0.9 &&
+          nowMs - beatLastMs > BEAT_MIN_INTERVAL_MS;
+
+        if (isBeat) {
+          beatLastMs = nowMs;
+          beatPulse = 1;
+        }
+
+        return beatPulse;
+      }
+
+      async function syncCloudAudioForColorPath(colorPath) {
+        const token = ++cloudAudioToken;
+        const baseName = extractBaseNameWithoutExt(colorPath);
+        if (!baseName) {
+          stopCloudAudio();
+          return;
+        }
+
+        const encodedName = encodeURIComponent(baseName);
+        const audioPath = `./audios/${encodedName}.mp3`;
+        stopCloudAudio();
+
+        try {
+          const response = await fetch(audioPath, { cache: "no-store" });
+          if (!response.ok) {
+            return;
+          }
+        } catch {
+          return;
+        }
+
+        if (token !== cloudAudioToken) {
+          return;
+        }
+
+        ensureAudioAnalysisGraph();
+        if (audioContext && audioContext.state === "suspended") {
+          try {
+            await audioContext.resume();
+          } catch {
+            // Ignore resume failures and attempt normal playback.
+          }
+        }
+
+        cloudAudio.src = audioPath;
+        try {
+          await cloudAudio.play();
+        } catch {
+          // Browser autoplay policies may block audio until first user interaction.
+        }
       }
 
       function snapshotParams() {
@@ -512,6 +712,8 @@
           "edgeBand",
           "edgeDropout",
           "hoverRadius",
+          "beatDepthBoost",
+          "beatBassHighHz",
           "hoverSoftness",
           "revealRiseSpeed",
           "revealFallSpeed",
@@ -540,6 +742,8 @@
             id === "depthScale" ||
             id === "interpPasses" ||
             id === "hoverRadius" ||
+            id === "beatDepthBoost" ||
+            id === "beatBassHighHz" ||
             id === "edgeScatter" ||
             id === "edgeBand"
           ) {
@@ -599,24 +803,79 @@
         colorImageData = readImageData(colorImg);
       }
 
-      async function applyPairById(pairId, persist = true) {
+      async function applyPairById(
+        pairId,
+        persist = true,
+        withTransition = true,
+      ) {
         const pair = pairedAssets.find((item) => item.id === pairId);
         if (!pair) {
           throw new Error("Pair not found: " + pairId);
         }
 
+        const switchToken = ++pairSwitchToken;
+
         params.colorPath = pair.colorPath;
         params.depthPath = pair.depthPath;
         pairSelectEl.value = pair.id;
 
+        if (withTransition) {
+          await startOutgoingScatter();
+          if (switchToken !== pairSwitchToken) {
+            return;
+          }
+        }
+
         await loadPairImages(params.colorPath, params.depthPath);
+        if (switchToken !== pairSwitchToken) {
+          return;
+        }
         hasFittedView = false;
-        rebuildPointCloud();
+        rebuildPointCloud({ spawnFromFar: withTransition });
+        await syncCloudAudioForColorPath(params.colorPath);
 
         if (persist) {
           scheduleSaveParams();
         }
       }
+
+      function normalizeAssetPath(pathValue) {
+        if (!pathValue) return "";
+        let normalized = String(pathValue).trim();
+        try {
+          const url = new URL(normalized, window.location.origin);
+          normalized = url.pathname;
+        } catch {
+          // Keep raw value when URL parsing fails.
+        }
+
+        normalized = normalized.replace(/\\/g, "/");
+        if (!normalized.startsWith("/")) {
+          normalized = "/" + normalized.replace(/^\.+\//, "");
+        }
+        return normalized;
+      }
+
+      async function switchPairByColorPath(colorPath) {
+        if (!pairedAssets.length) {
+          await fetchPairs();
+        }
+
+        const target = normalizeAssetPath(colorPath);
+        const match = pairedAssets.find(
+          (pair) => normalizeAssetPath(pair.colorPath) === target,
+        );
+
+        if (!match) {
+          throw new Error("No pair found for image: " + colorPath);
+        }
+
+        await applyPairById(match.id, true);
+      }
+
+      window.__pointCloudApi = {
+        switchPairByColorPath,
+      }; // React component control
 
       async function saveParams() {
         try {
@@ -723,6 +982,74 @@
         return t * t * (3 - 2 * t);
       }
 
+      function easeOutCubic(t) {
+        return 1 - Math.pow(1 - clamp01(t), 3);
+      }
+
+      function disposeCloudPoints(cloudPoints) {
+        if (!cloudPoints) return;
+        scene.remove(cloudPoints);
+        if (cloudPoints.geometry) {
+          cloudPoints.geometry.dispose();
+        }
+        if (cloudPoints.material) {
+          cloudPoints.material.dispose();
+        }
+      }
+
+      function startOutgoingScatter() {
+        if (
+          !points ||
+          !basePositions ||
+          !jitterDirections ||
+          !jitterPhases ||
+          !points.geometry ||
+          !points.material
+        ) {
+          return Promise.resolve();
+        }
+
+        if (outgoingCloud && outgoingCloud.points) {
+          disposeCloudPoints(outgoingCloud.points);
+          if (typeof outgoingCloud.resolve === "function") {
+            outgoingCloud.resolve();
+          }
+          outgoingCloud = null;
+        }
+
+        incomingTransition = null;
+
+        const cloudPoints = points;
+        outgoingCloud = {
+          points: cloudPoints,
+          basePositions,
+          scatterDirs: jitterDirections,
+          phases: jitterPhases,
+          startMs: performance.now(),
+          durationMs: OUTGOING_SCATTER_MS,
+          baseOpacity:
+            typeof cloudPoints.material.opacity === "number"
+              ? cloudPoints.material.opacity
+              : BASE_POINT_OPACITY,
+          resolve: null,
+        };
+
+        points = null;
+        basePositions = null;
+        depthZValues = null;
+        dynamicZValues = null;
+        jitterDirections = null;
+        jitterPhases = null;
+
+        return new Promise((resolve) => {
+          if (!outgoingCloud) {
+            resolve();
+            return;
+          }
+          outgoingCloud.resolve = resolve;
+        });
+      }
+
       function stableRandom(x, y, seed) {
         const v =
           Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453;
@@ -743,6 +1070,7 @@
       }
 
       function smoothDepthGrid(depthGrid, width, height, strength, passes) {
+        // apply interpolation to fill in missing depth values and soften harsh edges
         if (strength <= 0 || passes <= 0) return depthGrid;
 
         let src = depthGrid;
@@ -788,13 +1116,12 @@
         return src;
       }
 
-      function rebuildPointCloud() {
+      function rebuildPointCloud(options = {}) {
         if (!depthImageData || !colorImageData) return;
+        const spawnFromFar = Boolean(options.spawnFromFar);
 
         if (points) {
-          scene.remove(points);
-          points.geometry.dispose();
-          points.material.dispose();
+          disposeCloudPoints(points);
           points = null;
         }
 
@@ -857,7 +1184,10 @@
 
             const depth = smoothedDepthGrid[di];
             const depthZ = (depth - 0.5) * params.depthScale;
-            const initialZ = params.hoverRevealMode ? 0 : depthZ;
+            const settledZ = params.hoverRevealMode ? 0 : depthZ;
+            const initialZ = spawnFromFar
+              ? settledZ - INCOMING_START_Z_OFFSET
+              : settledZ;
 
             // Depth-based grading: foreground pops, background gets darker.
             const frontMask = Math.pow(clamp01(depth), 1.35);
@@ -936,11 +1266,20 @@
           vertexColors: true,
           sizeAttenuation: true,
           transparent: true,
-          opacity: 0.96,
+          opacity: spawnFromFar ? 0.02 : BASE_POINT_OPACITY,
         });
 
         points = new THREE.Points(geometry, material);
         scene.add(points);
+
+        incomingTransition = spawnFromFar
+          ? {
+              startMs: performance.now(),
+              durationMs: INCOMING_FLOAT_MS,
+              fromOpacity: 0.02,
+              toOpacity: BASE_POINT_OPACITY,
+            }
+          : null;
 
         // Keep immutable base coordinates and per-point random vectors for animation jitter.
         basePositions = new Float32Array(positions);
@@ -989,10 +1328,12 @@
             await applyPairById(
               matched ? matched.id : pairedAssets[0].id,
               false,
+              false,
             );
           } else {
             await loadPairImages(params.colorPath, params.depthPath);
             rebuildPointCloud();
+            await syncCloudAudioForColorPath(params.colorPath);
             setError(
               "No valid image/depth pairs found in images/ and maps/. " +
                 "Using current depthPath/colorPath fallback.",
@@ -1023,6 +1364,8 @@
           "edgeBand",
           "edgeDropout",
           "hoverRadius",
+          "beatDepthBoost",
+          "beatBassHighHz",
           "hoverSoftness",
           "revealRiseSpeed",
           "revealFallSpeed",
@@ -1035,6 +1378,8 @@
             id === "depthScale" ||
             id === "interpPasses" ||
             id === "hoverRadius" ||
+            id === "beatDepthBoost" ||
+            id === "beatBassHighHz" ||
             id === "edgeScatter" ||
             id === "edgeBand";
 
@@ -1064,6 +1409,8 @@
             if (
               id !== "jitterAmount" &&
               id !== "jitterSpeed" &&
+              id !== "beatDepthBoost" &&
+              id !== "beatBassHighHz" &&
               id !== "revealRiseSpeed" &&
               id !== "revealFallSpeed"
             ) {
@@ -1140,6 +1487,48 @@
       init();
 
       renderer.setAnimationLoop(() => {
+        if (outgoingCloud && outgoingCloud.points) {
+          const elapsed = performance.now() - outgoingCloud.startMs;
+          const rawT =
+            outgoingCloud.durationMs > 0
+              ? elapsed / outgoingCloud.durationMs
+              : 1;
+          const tScatter = clamp01(rawT);
+          const scatter = easeOutCubic(tScatter);
+          const pointsOut = outgoingCloud.points;
+          const posOut = pointsOut.geometry.attributes.position.array;
+          const countOut = outgoingCloud.phases.length;
+          const twirlTime = performance.now() * 0.001;
+
+          for (let i = 0; i < countOut; i += 1) {
+            const phase = outgoingCloud.phases[i];
+            const jitter = 1 + 0.2 * Math.sin(twirlTime * 4 + phase);
+            const dist = OUTGOING_SCATTER_DISTANCE * scatter * jitter;
+            const bx = outgoingCloud.basePositions[i * 3];
+            const by = outgoingCloud.basePositions[i * 3 + 1];
+            const bz = outgoingCloud.basePositions[i * 3 + 2];
+
+            posOut[i * 3] = bx + outgoingCloud.scatterDirs[i * 3] * dist;
+            posOut[i * 3 + 1] =
+              by + outgoingCloud.scatterDirs[i * 3 + 1] * dist;
+            posOut[i * 3 + 2] =
+              bz + outgoingCloud.scatterDirs[i * 3 + 2] * dist;
+          }
+
+          pointsOut.material.opacity =
+            outgoingCloud.baseOpacity * (1 - scatter);
+          pointsOut.geometry.attributes.position.needsUpdate = true;
+
+          if (tScatter >= 1) {
+            const done = outgoingCloud;
+            outgoingCloud = null;
+            disposeCloudPoints(done.points);
+            if (typeof done.resolve === "function") {
+              done.resolve();
+            }
+          }
+        }
+
         if (
           points &&
           basePositions &&
@@ -1148,16 +1537,56 @@
           jitterDirections &&
           jitterPhases
         ) {
+          const nowMs = performance.now();
+          const beatAmount = updateBeatPulse(nowMs);
           const amount = params.jitterAmount;
           const speed = params.jitterSpeed;
           const hasJitter = amount > 0 && speed > 0;
           const pos = points.geometry.attributes.position.array;
-          const t = performance.now() * 0.001 * speed;
+          const t = nowMs * 0.001 * speed;
           const count = jitterPhases.length;
+
+          if (incomingTransition) {
+            const incomingElapsed =
+              performance.now() - incomingTransition.startMs;
+            const incomingRaw =
+              incomingTransition.durationMs > 0
+                ? incomingElapsed / incomingTransition.durationMs
+                : 1;
+            const incomingT = clamp01(incomingRaw);
+            const incomingEased = easeOutCubic(incomingT);
+            points.material.opacity =
+              incomingTransition.fromOpacity +
+              (incomingTransition.toOpacity - incomingTransition.fromOpacity) *
+                incomingEased;
+            if (incomingT >= 1) {
+              incomingTransition = null;
+              points.material.opacity = BASE_POINT_OPACITY;
+            }
+          } else {
+            points.material.opacity = BASE_POINT_OPACITY;
+          }
 
           let hoverX = 0;
           let hoverY = 0;
           let hasHover = false;
+          let beatHoverX = 0;
+          let beatHoverY = 0;
+          let hasBeatHover = false;
+
+          const hoverPointForBeat = getHoverPointOnCloudPlane();
+          if (
+            hoverPointForBeat &&
+            pointerInside &&
+            Math.abs(hoverPointForBeat.x) <= cloudHalfW &&
+            Math.abs(hoverPointForBeat.y) <= cloudHalfH
+          ) {
+            beatHoverX = hoverPointForBeat.x;
+            beatHoverY = hoverPointForBeat.y;
+            hasBeatHover = true;
+          }
+
+          const beatRadius = Math.max(24, Number(params.hoverRadius) || 120);
 
           if (params.hoverRevealMode) {
             const hoverPoint = getHoverPointOnCloudPlane();
@@ -1208,13 +1637,28 @@
               const jz = hasJitter
                 ? jitterDirections[i * 3 + 2] * amount * wave
                 : 0;
+              let beatZ = 0;
+              if (hasBeatHover && beatAmount > 0.001) {
+                const beatDistance = Math.hypot(
+                  bx - beatHoverX,
+                  by - beatHoverY,
+                );
+                const beatInfluence =
+                  1 - smoothstep(0, beatRadius, beatDistance);
+                beatZ =
+                  beatInfluence *
+                  beatAmount *
+                  (Number(params.beatDepthBoost) || 0);
+              }
 
               pos[i * 3] = bx + jx;
               pos[i * 3 + 1] = by + jy;
-              pos[i * 3 + 2] = dynamicZValues[i] + jz;
+              pos[i * 3 + 2] = dynamicZValues[i] + jz + beatZ;
             }
           } else {
             for (let i = 0; i < count; i += 1) {
+              const bx = basePositions[i * 3];
+              const by = basePositions[i * 3 + 1];
               const targetZ = depthZValues[i];
               const easing =
                 targetZ > dynamicZValues[i]
@@ -1235,10 +1679,23 @@
               const jz = hasJitter
                 ? jitterDirections[i * 3 + 2] * amount * wave
                 : 0;
+              let beatZ = 0;
+              if (hasBeatHover && beatAmount > 0.001) {
+                const beatDistance = Math.hypot(
+                  bx - beatHoverX,
+                  by - beatHoverY,
+                );
+                const beatInfluence =
+                  1 - smoothstep(0, beatRadius, beatDistance);
+                beatZ =
+                  beatInfluence *
+                  beatAmount *
+                  (Number(params.beatDepthBoost) || 0);
+              }
 
-              pos[i * 3] = basePositions[i * 3] + jx;
-              pos[i * 3 + 1] = basePositions[i * 3 + 1] + jy;
-              pos[i * 3 + 2] = dynamicZValues[i] + jz;
+              pos[i * 3] = bx + jx;
+              pos[i * 3 + 1] = by + jy;
+              pos[i * 3 + 2] = dynamicZValues[i] + jz + beatZ;
             }
           }
 
@@ -1249,5 +1706,21 @@
         renderer.render(scene, camera);
       });
     </script>
+
+    <!-- React Chopsticks UI -->
+    <div id="chopsticks-root"></div>
+
+    <!-- React & ReactDOM from CDN -->
+    <script
+      crossorigin
+      src="https://unpkg.com/react@18/umd/react.production.min.js"
+    ></script>
+    <script
+      crossorigin
+      src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"
+    ></script>
+
+    <!-- Chopsticks React Application -->
+    <script src="./scripts/chopsticks-react.js"></script>
   </body>
 </html>

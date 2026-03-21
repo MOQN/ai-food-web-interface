@@ -1,3 +1,4 @@
 # ai-food-web-interface
 
-Run
+Run:
+npm start

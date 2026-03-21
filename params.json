@@ -12,11 +12,13 @@
   "edgeBand": 76,
   "edgeDropout": 1,
   "hoverRevealMode": false,
-  "hoverRadius": 550,
+  "hoverRadius": 340,
+  "beatDepthBoost": 137,
+  "beatBassHighHz": 130,
   "hoverSoftness": 0.3,
-  "revealRiseSpeed": 0.56,
-  "revealFallSpeed": 0.47,
+  "revealRiseSpeed": 0.93,
+  "revealFallSpeed": 0.51,
   "invertDepth": false,
-  "depthPath": "./maps/3-map.png",
-  "colorPath": "./images/3.png"
+  "depthPath": "./maps/4-map.png",
+  "colorPath": "./images/4.png"
 }
