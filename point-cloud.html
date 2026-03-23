@@ -1,0 +1,1726 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Depth Map Point Cloud (three.js)</title>
+    <style>
+      :root {
+        --bg: #0c111b;
+        --panel: rgba(12, 17, 27, 0.72);
+        --text: #ecf2ff;
+        --muted: #a8bbd9;
+        --accent: #6fc5ff;
+        --border: rgba(141, 173, 215, 0.3);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 15% 15%, #1f345c 0%, transparent 45%),
+          radial-gradient(circle at 85% 70%, #283f65 0%, transparent 40%),
+          var(--bg);
+        color: var(--text);
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      #app {
+        width: 100%;
+        height: 100%;
+      }
+
+      .panel {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 20;
+        width: min(320px, calc(100vw - 24px));
+        padding: 14px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        backdrop-filter: blur(8px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      }
+
+      .title {
+        margin: 0 0 10px;
+        font-size: 16px;
+        line-height: 1.2;
+        letter-spacing: 0.2px;
+      }
+
+      .muted {
+        margin: 0 0 10px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: 88px 1fr 50px;
+        gap: 8px;
+        align-items: center;
+        margin: 8px 0;
+        font-size: 12px;
+      }
+
+      .row input[type="range"] {
+        width: 100%;
+      }
+
+      .row select {
+        width: 100%;
+        background: rgba(9, 14, 22, 0.7);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 4px 6px;
+      }
+
+      .row .value {
+        text-align: right;
+        color: var(--accent);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        font-size: 13px;
+      }
+
+      .hint {
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .error {
+        color: #ff9f9f;
+        font-size: 12px;
+        margin-top: 8px;
+        white-space: pre-line;
+      }
+
+      .save-state {
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div class="panel">
+      <!-- <div class="panel" style="display: none"> -->
+      <h1 class="title">Depth Map Point Cloud</h1>
+      <p class="muted">
+        Auto-pairs files from images/ and maps/, then renders the selected pair.
+      </p>
+
+      <div class="row">
+        <label for="pairSelect">Image Pair</label>
+        <select id="pairSelect"></select>
+        <span class="value" id="pairCount">0</span>
+      </div>
+
+      <div class="row">
+        <label for="sampleStep">Sample Step</label>
+        <input
+          id="sampleStep"
+          type="range"
+          min="1"
+          max="8"
+          step="1"
+          value="2"
+        />
+        <span class="value" id="sampleStepVal">2</span>
+      </div>
+
+      <div class="row">
+        <label for="depthScale">Depth Scale</label>
+        <input
+          id="depthScale"
+          type="range"
+          min="20"
+          max="600"
+          step="10"
+          value="260"
+        />
+        <span class="value" id="depthScaleVal">260</span>
+      </div>
+
+      <div class="row">
+        <label for="pointSize">Point Size</label>
+        <input
+          id="pointSize"
+          type="range"
+          min="0.5"
+          max="8"
+          step="0.1"
+          value="5"
+        />
+        <span class="value" id="pointSizeVal">5</span>
+      </div>
+
+      <div class="row">
+        <label for="interpStrength">Interpolation</label>
+        <input
+          id="interpStrength"
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          value="1.00"
+        />
+        <span class="value" id="interpStrengthVal">1.00</span>
+      </div>
+
+      <div class="row">
+        <label for="interpPasses">Interp Passes</label>
+        <input
+          id="interpPasses"
+          type="range"
+          min="0"
+          max="35"
+          step="1"
+          value="10"
+        />
+        <span class="value" id="interpPassesVal">10</span>
+      </div>
+
+      <div class="row">
+        <label for="subjectBoost">Subject Boost</label>
+        <input
+          id="subjectBoost"
+          type="range"
+          min="0"
+          max="2"
+          step="0.05"
+          value="0.8"
+        />
+        <span class="value" id="subjectBoostVal">0.80</span>
+      </div>
+
+      <div class="row">
+        <label for="backgroundDim">Background Dim</label>
+        <input
+          id="backgroundDim"
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          value="0.45"
+        />
+        <span class="value" id="backgroundDimVal">0.45</span>
+      </div>
+
+      <div class="row">
+        <label for="jitterAmount">Jitter Amount</label>
+        <input
+          id="jitterAmount"
+          type="range"
+          min="0"
+          max="12"
+          step="0.1"
+          value="2.0"
+        />
+        <span class="value" id="jitterAmountVal">2.0</span>
+      </div>
+
+      <div class="row">
+        <label for="jitterSpeed">Jitter Speed</label>
+        <input
+          id="jitterSpeed"
+          type="range"
+          min="0"
+          max="4"
+          step="0.05"
+          value="1.00"
+        />
+        <span class="value" id="jitterSpeedVal">1.00</span>
+      </div>
+
+      <div class="row">
+        <label for="edgeScatter">Edge Scatter</label>
+        <input
+          id="edgeScatter"
+          type="range"
+          min="0"
+          max="80"
+          step="1"
+          value="18"
+        />
+        <span class="value" id="edgeScatterVal">18</span>
+      </div>
+
+      <div class="row">
+        <label for="edgeBand">Edge Band</label>
+        <input
+          id="edgeBand"
+          type="range"
+          min="4"
+          max="180"
+          step="2"
+          value="42"
+        />
+        <span class="value" id="edgeBandVal">42</span>
+      </div>
+
+      <div class="row">
+        <label for="edgeDropout">Edge Dropout</label>
+        <input
+          id="edgeDropout"
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value="0.28"
+        />
+        <span class="value" id="edgeDropoutVal">0.28</span>
+      </div>
+
+      <label class="check">
+        <input id="invertDepth" type="checkbox" />
+        <span>Invert Depth (common for many depth maps)</span>
+      </label>
+
+      <label class="check">
+        <input id="hoverRevealMode" type="checkbox" />
+        <span>Press-and-Hold Reveal Mode (flat by default)</span>
+      </label>
+
+      <div class="row">
+        <label for="hoverRadius">Reveal Radius</label>
+        <input
+          id="hoverRadius"
+          type="range"
+          min="20"
+          max="550"
+          step="5"
+          value="550"
+        />
+        <span class="value" id="hoverRadiusVal">550</span>
+      </div>
+
+      <div class="row">
+        <label for="beatDepthBoost">Beat Depth</label>
+        <input
+          id="beatDepthBoost"
+          type="range"
+          min="0"
+          max="180"
+          step="1"
+          value="64"
+        />
+        <span class="value" id="beatDepthBoostVal">64</span>
+      </div>
+
+      <div class="row">
+        <label for="beatBassHighHz">Beat High Hz</label>
+        <input
+          id="beatBassHighHz"
+          type="range"
+          min="80"
+          max="520"
+          step="5"
+          value="180"
+        />
+        <span class="value" id="beatBassHighHzVal">180</span>
+      </div>
+
+      <div class="row">
+        <label for="hoverSoftness">Edge Softness</label>
+        <input
+          id="hoverSoftness"
+          type="range"
+          min="0.05"
+          max="0.95"
+          step="0.05"
+          value="0.55"
+        />
+        <span class="value" id="hoverSoftnessVal">0.55</span>
+      </div>
+
+      <div class="row">
+        <label for="revealRiseSpeed">Rise Speed</label>
+        <input
+          id="revealRiseSpeed"
+          type="range"
+          min="0.02"
+          max="0.95"
+          step="0.01"
+          value="0.28"
+        />
+        <span class="value" id="revealRiseSpeedVal">0.28</span>
+      </div>
+
+      <div class="row">
+        <label for="revealFallSpeed">Fall Speed</label>
+        <input
+          id="revealFallSpeed"
+          type="range"
+          min="0.02"
+          max="0.95"
+          step="0.01"
+          value="0.14"
+        />
+        <span class="value" id="revealFallSpeedVal">0.14</span>
+      </div>
+
+      <p class="hint">Left drag: rotate, wheel: zoom, right drag: pan.</p>
+      <div id="saveState" class="save-state">Save State: Unsynced</div>
+      <div id="error" class="error"></div>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.164.1/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.164.1/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+      const app = document.getElementById("app");
+      const errorEl = document.getElementById("error");
+      const saveStateEl = document.getElementById("saveState");
+      const pairSelectEl = document.getElementById("pairSelect");
+      const pairCountEl = document.getElementById("pairCount");
+
+      const params = {
+        sampleStep: 2,
+        depthScale: 260,
+        pointSize: 5,
+        interpStrength: 1.0,
+        interpPasses: 30,
+        subjectBoost: 0.8,
+        backgroundDim: 0.45,
+        jitterAmount: 2.0,
+        jitterSpeed: 1.0,
+        edgeScatter: 18,
+        edgeBand: 42,
+        edgeDropout: 0.28,
+        hoverRevealMode: false,
+        hoverRadius: 120,
+        beatDepthBoost: 64,
+        beatBassHighHz: 180,
+        hoverSoftness: 0.55,
+        revealRiseSpeed: 0.28,
+        revealFallSpeed: 0.14,
+        invertDepth: true,
+        depthPath: "./3.png",
+        colorPath: "./4.png",
+      };
+
+      const PARAM_KEYS = [
+        "sampleStep",
+        "depthScale",
+        "pointSize",
+        "interpStrength",
+        "interpPasses",
+        "subjectBoost",
+        "backgroundDim",
+        "jitterAmount",
+        "jitterSpeed",
+        "edgeScatter",
+        "edgeBand",
+        "edgeDropout",
+        "hoverRevealMode",
+        "hoverRadius",
+        "beatDepthBoost",
+        "beatBassHighHz",
+        "hoverSoftness",
+        "revealRiseSpeed",
+        "revealFallSpeed",
+        "invertDepth",
+        "depthPath",
+        "colorPath",
+      ];
+
+      let saveTimer = null;
+      let isHydrating = false;
+      let pairedAssets = [];
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x070b13);
+
+      const camera = new THREE.PerspectiveCamera(
+        58,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        4000,
+      );
+      camera.position.set(0, 0, 900);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      app.appendChild(renderer.domElement);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.target.set(0, 0, 0);
+
+      const ambient = new THREE.AmbientLight(0xffffff, 0.65);
+      scene.add(ambient);
+
+      let points = null;
+      let depthImageData = null;
+      let colorImageData = null;
+      let hasFittedView = false;
+      let basePositions = null;
+      let depthZValues = null;
+      let dynamicZValues = null;
+      let jitterDirections = null;
+      let jitterPhases = null;
+      let cloudHalfW = 0;
+      let cloudHalfH = 0;
+
+      const raycaster = new THREE.Raycaster();
+      const pointerNdc = new THREE.Vector2(2, 2);
+      let pointerInside = false;
+      let pointerPressed = false;
+      const OUTGOING_SCATTER_MS = 620;
+      const OUTGOING_SCATTER_DISTANCE = 240;
+      const INCOMING_FLOAT_MS = 980;
+      const INCOMING_START_Z_OFFSET = 680;
+      const BASE_POINT_OPACITY = 0.96;
+      let outgoingCloud = null;
+      let incomingTransition = null;
+      let pairSwitchToken = 0;
+      const cloudAudio = new Audio();
+      cloudAudio.loop = true;
+      cloudAudio.preload = "auto";
+      let cloudAudioToken = 0;
+      let audioContext = null;
+      let audioSourceNode = null;
+      let audioAnalyser = null;
+      let audioFreqData = null;
+      let prevBassEnergy = 0;
+      let fluxAverage = 0;
+      let energyAverage = 0;
+      let beatPulse = 0;
+      let beatLastMs = 0;
+      let beatUpdateLastMs = performance.now();
+      const BEAT_BASS_LOW_HZ = 30;
+      const BEAT_MIN_INTERVAL_MS = 125;
+      const BEAT_DECAY_PER_SEC = 5.8;
+
+      function setError(message) {
+        errorEl.textContent = message || "";
+      }
+
+      function setSaveState(message) {
+        saveStateEl.textContent = "Save State: " + message;
+      }
+
+      function setPairCount() {
+        pairCountEl.textContent = String(pairedAssets.length);
+      }
+
+      function stopCloudAudio() {
+        cloudAudio.pause();
+        cloudAudio.currentTime = 0;
+        cloudAudio.removeAttribute("src");
+        cloudAudio.load();
+      }
+
+      function extractBaseNameWithoutExt(pathValue) {
+        const normalized = String(pathValue || "")
+          .replace(/\\/g, "/")
+          .split("/")
+          .pop();
+        if (!normalized) return "";
+        return normalized.replace(/\.[^/.]+$/, "");
+      }
+
+      function ensureAudioAnalysisGraph() {
+        if (audioAnalyser && audioFreqData) {
+          return;
+        }
+
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) {
+          return;
+        }
+
+        if (!audioContext) {
+          audioContext = new AudioCtx();
+        }
+
+        if (!audioSourceNode) {
+          audioSourceNode = audioContext.createMediaElementSource(cloudAudio);
+        }
+
+        if (!audioAnalyser) {
+          audioAnalyser = audioContext.createAnalyser();
+          audioAnalyser.fftSize = 1024;
+          audioAnalyser.smoothingTimeConstant = 0.28;
+          audioSourceNode.connect(audioAnalyser);
+          audioAnalyser.connect(audioContext.destination);
+        }
+
+        audioFreqData = new Uint8Array(audioAnalyser.frequencyBinCount);
+      }
+
+      function updateBeatPulse(nowMs) {
+        const dtSec = Math.max(0, (nowMs - beatUpdateLastMs) * 0.001);
+        beatUpdateLastMs = nowMs;
+        beatPulse *= Math.exp(-BEAT_DECAY_PER_SEC * dtSec);
+
+        if (
+          !audioAnalyser ||
+          !audioFreqData ||
+          cloudAudio.paused ||
+          cloudAudio.ended
+        ) {
+          return beatPulse;
+        }
+
+        audioAnalyser.getByteFrequencyData(audioFreqData);
+
+        const sampleRate = audioContext ? audioContext.sampleRate : 44100;
+        const nyquist = sampleRate * 0.5;
+        const hzPerBin = nyquist / audioFreqData.length;
+
+        let bassSum = 0;
+        let bassCount = 0;
+        const bassHighHz = Math.max(
+          BEAT_BASS_LOW_HZ + 10,
+          Number(params.beatBassHighHz) || 180,
+        );
+        for (let i = 0; i < audioFreqData.length; i += 1) {
+          const freq = i * hzPerBin;
+          if (freq < BEAT_BASS_LOW_HZ || freq > bassHighHz) continue;
+          bassSum += audioFreqData[i];
+          bassCount += 1;
+        }
+
+        if (bassCount <= 0) {
+          return beatPulse;
+        }
+
+        const bassEnergy = bassSum / bassCount / 255;
+        const flux = Math.max(0, bassEnergy - prevBassEnergy);
+        prevBassEnergy = bassEnergy;
+
+        energyAverage = energyAverage * 0.9 + bassEnergy * 0.1;
+        fluxAverage = fluxAverage * 0.88 + flux * 0.12;
+        const dynamicThreshold = fluxAverage * 1.45 + 0.012;
+        const isBeat =
+          flux > dynamicThreshold &&
+          bassEnergy > energyAverage * 0.9 &&
+          nowMs - beatLastMs > BEAT_MIN_INTERVAL_MS;
+
+        if (isBeat) {
+          beatLastMs = nowMs;
+          beatPulse = 1;
+        }
+
+        return beatPulse;
+      }
+
+      async function syncCloudAudioForColorPath(colorPath) {
+        const token = ++cloudAudioToken;
+        const baseName = extractBaseNameWithoutExt(colorPath);
+        if (!baseName) {
+          stopCloudAudio();
+          return;
+        }
+
+        const encodedName = encodeURIComponent(baseName);
+        const audioPath = `./audios/${encodedName}.mp3`;
+        stopCloudAudio();
+
+        try {
+          const response = await fetch(audioPath, { cache: "no-store" });
+          if (!response.ok) {
+            return;
+          }
+        } catch {
+          return;
+        }
+
+        if (token !== cloudAudioToken) {
+          return;
+        }
+
+        ensureAudioAnalysisGraph();
+        if (audioContext && audioContext.state === "suspended") {
+          try {
+            await audioContext.resume();
+          } catch {
+            // Ignore resume failures and attempt normal playback.
+          }
+        }
+
+        cloudAudio.src = audioPath;
+        try {
+          await cloudAudio.play();
+        } catch {
+          // Browser autoplay policies may block audio until first user interaction.
+        }
+      }
+
+      function snapshotParams() {
+        const payload = {};
+        PARAM_KEYS.forEach((key) => {
+          payload[key] = params[key];
+        });
+        return payload;
+      }
+
+      function applyParamPatch(patch) {
+        if (!patch || typeof patch !== "object") return;
+        PARAM_KEYS.forEach((key) => {
+          if (Object.prototype.hasOwnProperty.call(patch, key)) {
+            params[key] = patch[key];
+          }
+        });
+      }
+
+      function syncUIFromParams() {
+        const sliderIds = [
+          "sampleStep",
+          "depthScale",
+          "pointSize",
+          "interpStrength",
+          "interpPasses",
+          "subjectBoost",
+          "backgroundDim",
+          "jitterAmount",
+          "jitterSpeed",
+          "edgeScatter",
+          "edgeBand",
+          "edgeDropout",
+          "hoverRadius",
+          "beatDepthBoost",
+          "beatBassHighHz",
+          "hoverSoftness",
+          "revealRiseSpeed",
+          "revealFallSpeed",
+        ];
+
+        sliderIds.forEach((id) => {
+          const el = document.getElementById(id);
+          const valEl = document.getElementById(id + "Val");
+          if (!el || !valEl) return;
+
+          el.value = String(params[id]);
+
+          if (
+            id === "interpStrength" ||
+            id === "jitterSpeed" ||
+            id === "subjectBoost" ||
+            id === "backgroundDim" ||
+            id === "hoverSoftness" ||
+            id === "edgeDropout" ||
+            id === "revealRiseSpeed" ||
+            id === "revealFallSpeed"
+          ) {
+            valEl.textContent = Number(params[id]).toFixed(2);
+          } else if (
+            id === "sampleStep" ||
+            id === "depthScale" ||
+            id === "interpPasses" ||
+            id === "hoverRadius" ||
+            id === "beatDepthBoost" ||
+            id === "beatBassHighHz" ||
+            id === "edgeScatter" ||
+            id === "edgeBand"
+          ) {
+            valEl.textContent = String(Math.round(Number(params[id])));
+          } else {
+            valEl.textContent = Number(params[id]).toFixed(1);
+          }
+        });
+
+        const invertEl = document.getElementById("invertDepth");
+        invertEl.checked = Boolean(params.invertDepth);
+
+        const hoverRevealEl = document.getElementById("hoverRevealMode");
+        hoverRevealEl.checked = Boolean(params.hoverRevealMode);
+
+        if (pairedAssets.length > 0) {
+          const matched = pairedAssets.find(
+            (pair) =>
+              pair.colorPath === params.colorPath &&
+              pair.depthPath === params.depthPath,
+          );
+          if (matched) {
+            pairSelectEl.value = matched.id;
+          }
+        }
+      }
+
+      async function fetchPairs() {
+        const response = await fetch("/api/pairs", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error("Failed to load pairs: " + response.status);
+        }
+
+        const data = await response.json();
+        if (!data || !Array.isArray(data.pairs)) {
+          throw new Error("Invalid pair data");
+        }
+
+        pairedAssets = data.pairs;
+        pairSelectEl.innerHTML = "";
+        pairedAssets.forEach((pair) => {
+          const option = document.createElement("option");
+          option.value = pair.id;
+          option.textContent = pair.label;
+          pairSelectEl.appendChild(option);
+        });
+        setPairCount();
+      }
+
+      async function loadPairImages(colorPath, depthPath) {
+        const [depthImg, colorImg] = await Promise.all([
+          loadImage(depthPath),
+          loadImage(colorPath),
+        ]);
+
+        depthImageData = readImageData(depthImg);
+        colorImageData = readImageData(colorImg);
+      }
+
+      async function applyPairById(
+        pairId,
+        persist = true,
+        withTransition = true,
+      ) {
+        const pair = pairedAssets.find((item) => item.id === pairId);
+        if (!pair) {
+          throw new Error("Pair not found: " + pairId);
+        }
+
+        const switchToken = ++pairSwitchToken;
+
+        params.colorPath = pair.colorPath;
+        params.depthPath = pair.depthPath;
+        pairSelectEl.value = pair.id;
+
+        if (withTransition) {
+          await startOutgoingScatter();
+          if (switchToken !== pairSwitchToken) {
+            return;
+          }
+        }
+
+        await loadPairImages(params.colorPath, params.depthPath);
+        if (switchToken !== pairSwitchToken) {
+          return;
+        }
+        hasFittedView = false;
+        rebuildPointCloud({ spawnFromFar: withTransition });
+        await syncCloudAudioForColorPath(params.colorPath);
+
+        if (persist) {
+          scheduleSaveParams();
+        }
+      }
+
+      function normalizeAssetPath(pathValue) {
+        if (!pathValue) return "";
+        let normalized = String(pathValue).trim();
+        try {
+          const url = new URL(normalized, window.location.origin);
+          normalized = url.pathname;
+        } catch {
+          // Keep raw value when URL parsing fails.
+        }
+
+        normalized = normalized.replace(/\\/g, "/");
+        if (!normalized.startsWith("/")) {
+          normalized = "/" + normalized.replace(/^\.+\//, "");
+        }
+        return normalized;
+      }
+
+      async function switchPairByColorPath(colorPath) {
+        if (!pairedAssets.length) {
+          await fetchPairs();
+        }
+
+        const target = normalizeAssetPath(colorPath);
+        const match = pairedAssets.find(
+          (pair) => normalizeAssetPath(pair.colorPath) === target,
+        );
+
+        if (!match) {
+          throw new Error("No pair found for image: " + colorPath);
+        }
+
+        await applyPairById(match.id, true);
+      }
+
+      window.__pointCloudApi = {
+        switchPairByColorPath,
+      }; // React component control
+
+      async function saveParams() {
+        try {
+          setSaveState("Saving...");
+          const response = await fetch("/api/params", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(snapshotParams()),
+          });
+
+          if (!response.ok) {
+            throw new Error("Save failed: " + response.status);
+          }
+          setSaveState("Saved");
+        } catch (err) {
+          setSaveState("Save failed");
+          setError("Failed to save params: " + String(err.message || err));
+        }
+      }
+
+      function scheduleSaveParams() {
+        if (isHydrating) return;
+        if (saveTimer) {
+          clearTimeout(saveTimer);
+        }
+        setSaveState("Pending save...");
+        saveTimer = setTimeout(() => {
+          saveTimer = null;
+          saveParams();
+        }, 180);
+      }
+
+      async function loadPersistedParams() {
+        try {
+          setSaveState("Loading...");
+          const response = await fetch("/api/params", {
+            cache: "no-store",
+          });
+
+          if (!response.ok) {
+            throw new Error("Load failed: " + response.status);
+          }
+
+          const persisted = await response.json();
+          isHydrating = true;
+          applyParamPatch(persisted);
+          syncUIFromParams();
+          isHydrating = false;
+          setSaveState("Loaded");
+        } catch (err) {
+          isHydrating = false;
+          setSaveState("Using defaults");
+          setError(
+            "Failed to load params. Using defaults.\n" +
+              String(err.message || err),
+          );
+        }
+      }
+
+      function readImageData(image) {
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(image, 0, 0);
+        return ctx.getImageData(0, 0, image.width, image.height);
+      }
+
+      function loadImage(path) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () =>
+            reject(new Error("Failed to load image: " + path));
+          img.src = path;
+        });
+      }
+
+      function sampleDepth(depthData, depthW, depthH, x, y, outW, outH) {
+        const dx = Math.min(
+          depthW - 1,
+          Math.max(0, Math.floor((x / outW) * depthW)),
+        );
+        const dy = Math.min(
+          depthH - 1,
+          Math.max(0, Math.floor((y / outH) * depthH)),
+        );
+        const idx = (dy * depthW + dx) * 4;
+        const r = depthData[idx];
+        const g = depthData[idx + 1];
+        const b = depthData[idx + 2];
+        return (r + g + b) / 3 / 255;
+      }
+
+      function clamp01(value) {
+        return Math.min(1, Math.max(0, value));
+      }
+
+      function smoothstep(edge0, edge1, x) {
+        if (edge1 <= edge0) return x < edge0 ? 0 : 1;
+        const t = clamp01((x - edge0) / (edge1 - edge0));
+        return t * t * (3 - 2 * t);
+      }
+
+      function easeOutCubic(t) {
+        return 1 - Math.pow(1 - clamp01(t), 3);
+      }
+
+      function disposeCloudPoints(cloudPoints) {
+        if (!cloudPoints) return;
+        scene.remove(cloudPoints);
+        if (cloudPoints.geometry) {
+          cloudPoints.geometry.dispose();
+        }
+        if (cloudPoints.material) {
+          cloudPoints.material.dispose();
+        }
+      }
+
+      function startOutgoingScatter() {
+        if (
+          !points ||
+          !basePositions ||
+          !jitterDirections ||
+          !jitterPhases ||
+          !points.geometry ||
+          !points.material
+        ) {
+          return Promise.resolve();
+        }
+
+        if (outgoingCloud && outgoingCloud.points) {
+          disposeCloudPoints(outgoingCloud.points);
+          if (typeof outgoingCloud.resolve === "function") {
+            outgoingCloud.resolve();
+          }
+          outgoingCloud = null;
+        }
+
+        incomingTransition = null;
+
+        const cloudPoints = points;
+        outgoingCloud = {
+          points: cloudPoints,
+          basePositions,
+          scatterDirs: jitterDirections,
+          phases: jitterPhases,
+          startMs: performance.now(),
+          durationMs: OUTGOING_SCATTER_MS,
+          baseOpacity:
+            typeof cloudPoints.material.opacity === "number"
+              ? cloudPoints.material.opacity
+              : BASE_POINT_OPACITY,
+          resolve: null,
+        };
+
+        points = null;
+        basePositions = null;
+        depthZValues = null;
+        dynamicZValues = null;
+        jitterDirections = null;
+        jitterPhases = null;
+
+        return new Promise((resolve) => {
+          if (!outgoingCloud) {
+            resolve();
+            return;
+          }
+          outgoingCloud.resolve = resolve;
+        });
+      }
+
+      function stableRandom(x, y, seed) {
+        const v =
+          Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43758.5453;
+        return v - Math.floor(v);
+      }
+
+      function getHoverPointOnCloudPlane() {
+        if (!pointerInside) return null;
+        raycaster.setFromCamera(pointerNdc, camera);
+        const origin = raycaster.ray.origin;
+        const dir = raycaster.ray.direction;
+        if (Math.abs(dir.z) < 1e-6) return null;
+
+        const t = -origin.z / dir.z;
+        if (t <= 0) return null;
+
+        return new THREE.Vector3(origin.x + dir.x * t, origin.y + dir.y * t, 0);
+      }
+
+      function smoothDepthGrid(depthGrid, width, height, strength, passes) {
+        // apply interpolation to fill in missing depth values and soften harsh edges
+        if (strength <= 0 || passes <= 0) return depthGrid;
+
+        let src = depthGrid;
+        let dst = new Float32Array(depthGrid.length);
+
+        for (let pass = 0; pass < passes; pass += 1) {
+          for (let gy = 0; gy < height; gy += 1) {
+            for (let gx = 0; gx < width; gx += 1) {
+              const i = gy * width + gx;
+              const center = src[i];
+
+              let sum = center;
+              let weight = 1;
+
+              for (let oy = -1; oy <= 1; oy += 1) {
+                for (let ox = -1; ox <= 1; ox += 1) {
+                  if (ox === 0 && oy === 0) continue;
+
+                  const nx = gx + ox;
+                  const ny = gy + oy;
+                  if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+
+                  const n = src[ny * width + nx];
+
+                  // Edge-aware weighting keeps major silhouettes while softening harsh jumps.
+                  const diff = Math.abs(n - center);
+                  const w = 1 - Math.min(1, diff * 2.6);
+                  sum += n * w;
+                  weight += w;
+                }
+              }
+
+              const localMean = sum / weight;
+              dst[i] = center + (localMean - center) * strength;
+            }
+          }
+
+          const tmp = src;
+          src = dst;
+          dst = tmp;
+        }
+
+        return src;
+      }
+
+      function rebuildPointCloud(options = {}) {
+        if (!depthImageData || !colorImageData) return;
+        const spawnFromFar = Boolean(options.spawnFromFar);
+
+        if (points) {
+          disposeCloudPoints(points);
+          points = null;
+        }
+
+        const outW = colorImageData.width;
+        const outH = colorImageData.height;
+        const depthW = depthImageData.width;
+        const depthH = depthImageData.height;
+
+        const step = params.sampleStep;
+        const xCount = Math.ceil(outW / step);
+        const yCount = Math.ceil(outH / step);
+        const pointCount = xCount * yCount;
+
+        const positionsList = [];
+        const colorsList = [];
+        const depthZList = [];
+        const dynamicZList = [];
+
+        const colorData = colorImageData.data;
+        const depthData = depthImageData.data;
+        const halfW = outW * 0.5;
+        const halfH = outH * 0.5;
+        cloudHalfW = halfW;
+        cloudHalfH = halfH;
+
+        const depthGrid = new Float32Array(pointCount);
+        let d = 0;
+        for (let y = 0; y < outH; y += step) {
+          for (let x = 0; x < outW; x += step) {
+            let depth = sampleDepth(
+              depthData,
+              depthW,
+              depthH,
+              x,
+              y,
+              outW,
+              outH,
+            );
+            if (params.invertDepth) depth = 1 - depth;
+            depthGrid[d] = depth;
+            d += 1;
+          }
+        }
+
+        const smoothedDepthGrid = smoothDepthGrid(
+          depthGrid,
+          xCount,
+          yCount,
+          params.interpStrength,
+          params.interpPasses,
+        );
+
+        let di = 0;
+        for (let y = 0; y < outH; y += step) {
+          for (let x = 0; x < outW; x += step) {
+            const cIdx = (y * outW + x) * 4;
+            const r = colorData[cIdx] / 255;
+            const g = colorData[cIdx + 1] / 255;
+            const b = colorData[cIdx + 2] / 255;
+
+            const depth = smoothedDepthGrid[di];
+            const depthZ = (depth - 0.5) * params.depthScale;
+            const settledZ = params.hoverRevealMode ? 0 : depthZ;
+            const initialZ = spawnFromFar
+              ? settledZ - INCOMING_START_Z_OFFSET
+              : settledZ;
+
+            // Depth-based grading: foreground pops, background gets darker.
+            const frontMask = Math.pow(clamp01(depth), 1.35);
+            const fgFactor = 1 + params.subjectBoost * frontMask;
+            const bgFactor = 1 - params.backgroundDim * (1 - frontMask);
+            const colorFactor = fgFactor * bgFactor;
+
+            let px = x - halfW;
+            let py = -(y - halfH);
+            const distToEdge = Math.min(x, outW - 1 - x, y, outH - 1 - y);
+            const edgeMask =
+              params.edgeBand > 0
+                ? 1 - smoothstep(0, params.edgeBand, distToEdge)
+                : 0;
+
+            // Randomly hide some edge particles for broken/frayed silhouette.
+            if (params.edgeDropout > 0 && edgeMask > 0) {
+              const dropChance = clamp01(params.edgeDropout) * edgeMask;
+              if (stableRandom(x, y, 7) < dropChance) {
+                di += 1;
+                continue;
+              }
+            }
+
+            // Break perfect rectangle silhouette by pushing only edge particles outward.
+            if (params.edgeScatter > 0 && params.edgeBand > 0) {
+              if (edgeMask > 0) {
+                const cx = x - halfW;
+                const cy = -(y - halfH);
+                const clen = Math.hypot(cx, cy) || 1;
+                const outwardX = cx / clen;
+                const outwardY = cy / clen;
+
+                const angle = stableRandom(x, y, 1) * Math.PI * 2;
+                const rndX = Math.cos(angle);
+                const rndY = Math.sin(angle);
+
+                const mix = 0.35 + stableRandom(x, y, 2) * 0.65;
+                const dirX = outwardX * 0.6 + rndX * 0.4;
+                const dirY = outwardY * 0.6 + rndY * 0.4;
+                const dirLen = Math.hypot(dirX, dirY) || 1;
+
+                const offset = params.edgeScatter * edgeMask * mix;
+                px += (dirX / dirLen) * offset;
+                py += (dirY / dirLen) * offset;
+              }
+            }
+
+            positionsList.push(px, py, initialZ);
+            colorsList.push(
+              clamp01(r * colorFactor),
+              clamp01(g * colorFactor),
+              clamp01(b * colorFactor),
+            );
+            depthZList.push(depthZ);
+            dynamicZList.push(initialZ);
+
+            di += 1;
+          }
+        }
+
+        const positions = new Float32Array(positionsList);
+        const colors = new Float32Array(colorsList);
+        depthZValues = new Float32Array(depthZList);
+        dynamicZValues = new Float32Array(dynamicZList);
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute(
+          "position",
+          new THREE.BufferAttribute(positions, 3),
+        );
+        geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.PointsMaterial({
+          size: params.pointSize,
+          vertexColors: true,
+          sizeAttenuation: true,
+          transparent: true,
+          opacity: spawnFromFar ? 0.02 : BASE_POINT_OPACITY,
+        });
+
+        points = new THREE.Points(geometry, material);
+        scene.add(points);
+
+        incomingTransition = spawnFromFar
+          ? {
+              startMs: performance.now(),
+              durationMs: INCOMING_FLOAT_MS,
+              fromOpacity: 0.02,
+              toOpacity: BASE_POINT_OPACITY,
+            }
+          : null;
+
+        // Keep immutable base coordinates and per-point random vectors for animation jitter.
+        basePositions = new Float32Array(positions);
+        const activePointCount = positions.length / 3;
+        jitterDirections = new Float32Array(activePointCount * 3);
+        jitterPhases = new Float32Array(activePointCount);
+
+        for (let i = 0; i < activePointCount; i += 1) {
+          let vx = Math.random() * 2 - 1;
+          let vy = Math.random() * 2 - 1;
+          let vz = Math.random() * 2 - 1;
+          const len = Math.hypot(vx, vy, vz) || 1;
+          vx /= len;
+          vy /= len;
+          vz /= len;
+
+          jitterDirections[i * 3] = vx;
+          jitterDirections[i * 3 + 1] = vy;
+          jitterDirections[i * 3 + 2] = vz;
+          jitterPhases[i] = Math.random() * Math.PI * 2;
+        }
+
+        // Only auto-fit once so UI slider updates do not reset user view.
+        if (!hasFittedView) {
+          const fov = camera.fov * (Math.PI / 180);
+          const dist = (outH * 0.6) / Math.tan(fov / 2);
+          camera.position.set(0, 0, Math.max(320, dist));
+          controls.target.set(0, 0, 0);
+          controls.update();
+          hasFittedView = true;
+        }
+      }
+
+      async function init() {
+        setError("");
+        try {
+          await loadPersistedParams();
+          await fetchPairs();
+
+          if (pairedAssets.length > 0) {
+            const matched = pairedAssets.find(
+              (pair) =>
+                pair.colorPath === params.colorPath &&
+                pair.depthPath === params.depthPath,
+            );
+            await applyPairById(
+              matched ? matched.id : pairedAssets[0].id,
+              false,
+              false,
+            );
+          } else {
+            await loadPairImages(params.colorPath, params.depthPath);
+            rebuildPointCloud();
+            await syncCloudAudioForColorPath(params.colorPath);
+            setError(
+              "No valid image/depth pairs found in images/ and maps/. " +
+                "Using current depthPath/colorPath fallback.",
+            );
+          }
+        } catch (err) {
+          setError(
+            "Initialization failed.\n" +
+              "1) Ensure images/ and maps/ contain valid files\n" +
+              "2) Open via a local server to avoid file:// restrictions\n\n" +
+              String(err.message || err),
+          );
+        }
+      }
+
+      function bindUI() {
+        const ids = [
+          "sampleStep",
+          "depthScale",
+          "pointSize",
+          "interpStrength",
+          "interpPasses",
+          "subjectBoost",
+          "backgroundDim",
+          "jitterAmount",
+          "jitterSpeed",
+          "edgeScatter",
+          "edgeBand",
+          "edgeDropout",
+          "hoverRadius",
+          "beatDepthBoost",
+          "beatBassHighHz",
+          "hoverSoftness",
+          "revealRiseSpeed",
+          "revealFallSpeed",
+        ];
+        ids.forEach((id) => {
+          const el = document.getElementById(id);
+          const valEl = document.getElementById(id + "Val");
+          const isInt =
+            id === "sampleStep" ||
+            id === "depthScale" ||
+            id === "interpPasses" ||
+            id === "hoverRadius" ||
+            id === "beatDepthBoost" ||
+            id === "beatBassHighHz" ||
+            id === "edgeScatter" ||
+            id === "edgeBand";
+
+          el.addEventListener("input", () => {
+            const value = Number(el.value);
+            params[id] = value;
+            if (
+              id === "interpStrength" ||
+              id === "jitterSpeed" ||
+              id === "subjectBoost" ||
+              id === "backgroundDim" ||
+              id === "hoverSoftness" ||
+              id === "edgeDropout" ||
+              id === "revealRiseSpeed" ||
+              id === "revealFallSpeed"
+            ) {
+              valEl.textContent = value.toFixed(2);
+            } else {
+              valEl.textContent = isInt
+                ? String(Math.round(value))
+                : value.toFixed(1);
+            }
+
+            scheduleSaveParams();
+
+            // Some params only affect animation, no need to rebuild geometry.
+            if (
+              id !== "jitterAmount" &&
+              id !== "jitterSpeed" &&
+              id !== "beatDepthBoost" &&
+              id !== "beatBassHighHz" &&
+              id !== "revealRiseSpeed" &&
+              id !== "revealFallSpeed"
+            ) {
+              rebuildPointCloud();
+            }
+          });
+        });
+
+        const invertEl = document.getElementById("invertDepth");
+        invertEl.addEventListener("change", () => {
+          params.invertDepth = invertEl.checked;
+          scheduleSaveParams();
+          rebuildPointCloud();
+        });
+
+        const hoverRevealEl = document.getElementById("hoverRevealMode");
+        hoverRevealEl.addEventListener("change", () => {
+          params.hoverRevealMode = hoverRevealEl.checked;
+          scheduleSaveParams();
+        });
+
+        pairSelectEl.addEventListener("change", async () => {
+          if (!pairSelectEl.value) return;
+          setSaveState("Loading pair...");
+          try {
+            await applyPairById(pairSelectEl.value, true);
+            setSaveState("Pair loaded");
+          } catch (err) {
+            setSaveState("Load failed");
+            setError("Failed to switch pair: " + String(err.message || err));
+          }
+        });
+      }
+
+      function onResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function updatePointerFromEvent(event) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        pointerNdc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        pointerNdc.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+      }
+
+      window.addEventListener("resize", onResize);
+
+      renderer.domElement.addEventListener("pointermove", (event) => {
+        updatePointerFromEvent(event);
+        pointerInside = true;
+      });
+
+      renderer.domElement.addEventListener("pointerdown", (event) => {
+        updatePointerFromEvent(event);
+        pointerInside = true;
+        pointerPressed = true;
+      });
+
+      window.addEventListener("pointerup", () => {
+        pointerPressed = false;
+      });
+
+      window.addEventListener("pointercancel", () => {
+        pointerPressed = false;
+      });
+
+      renderer.domElement.addEventListener("pointerleave", () => {
+        pointerInside = false;
+        pointerPressed = false;
+      });
+
+      bindUI();
+      init();
+
+      renderer.setAnimationLoop(() => {
+        if (outgoingCloud && outgoingCloud.points) {
+          const elapsed = performance.now() - outgoingCloud.startMs;
+          const rawT =
+            outgoingCloud.durationMs > 0
+              ? elapsed / outgoingCloud.durationMs
+              : 1;
+          const tScatter = clamp01(rawT);
+          const scatter = easeOutCubic(tScatter);
+          const pointsOut = outgoingCloud.points;
+          const posOut = pointsOut.geometry.attributes.position.array;
+          const countOut = outgoingCloud.phases.length;
+          const twirlTime = performance.now() * 0.001;
+
+          for (let i = 0; i < countOut; i += 1) {
+            const phase = outgoingCloud.phases[i];
+            const jitter = 1 + 0.2 * Math.sin(twirlTime * 4 + phase);
+            const dist = OUTGOING_SCATTER_DISTANCE * scatter * jitter;
+            const bx = outgoingCloud.basePositions[i * 3];
+            const by = outgoingCloud.basePositions[i * 3 + 1];
+            const bz = outgoingCloud.basePositions[i * 3 + 2];
+
+            posOut[i * 3] = bx + outgoingCloud.scatterDirs[i * 3] * dist;
+            posOut[i * 3 + 1] =
+              by + outgoingCloud.scatterDirs[i * 3 + 1] * dist;
+            posOut[i * 3 + 2] =
+              bz + outgoingCloud.scatterDirs[i * 3 + 2] * dist;
+          }
+
+          pointsOut.material.opacity =
+            outgoingCloud.baseOpacity * (1 - scatter);
+          pointsOut.geometry.attributes.position.needsUpdate = true;
+
+          if (tScatter >= 1) {
+            const done = outgoingCloud;
+            outgoingCloud = null;
+            disposeCloudPoints(done.points);
+            if (typeof done.resolve === "function") {
+              done.resolve();
+            }
+          }
+        }
+
+        if (
+          points &&
+          basePositions &&
+          depthZValues &&
+          dynamicZValues &&
+          jitterDirections &&
+          jitterPhases
+        ) {
+          const nowMs = performance.now();
+          const beatAmount = updateBeatPulse(nowMs);
+          const amount = params.jitterAmount;
+          const speed = params.jitterSpeed;
+          const hasJitter = amount > 0 && speed > 0;
+          const pos = points.geometry.attributes.position.array;
+          const t = nowMs * 0.001 * speed;
+          const count = jitterPhases.length;
+
+          if (incomingTransition) {
+            const incomingElapsed =
+              performance.now() - incomingTransition.startMs;
+            const incomingRaw =
+              incomingTransition.durationMs > 0
+                ? incomingElapsed / incomingTransition.durationMs
+                : 1;
+            const incomingT = clamp01(incomingRaw);
+            const incomingEased = easeOutCubic(incomingT);
+            points.material.opacity =
+              incomingTransition.fromOpacity +
+              (incomingTransition.toOpacity - incomingTransition.fromOpacity) *
+                incomingEased;
+            if (incomingT >= 1) {
+              incomingTransition = null;
+              points.material.opacity = BASE_POINT_OPACITY;
+            }
+          } else {
+            points.material.opacity = BASE_POINT_OPACITY;
+          }
+
+          let hoverX = 0;
+          let hoverY = 0;
+          let hasHover = false;
+          let beatHoverX = 0;
+          let beatHoverY = 0;
+          let hasBeatHover = false;
+
+          const hoverPointForBeat = getHoverPointOnCloudPlane();
+          if (
+            hoverPointForBeat &&
+            pointerInside &&
+            Math.abs(hoverPointForBeat.x) <= cloudHalfW &&
+            Math.abs(hoverPointForBeat.y) <= cloudHalfH
+          ) {
+            beatHoverX = hoverPointForBeat.x;
+            beatHoverY = hoverPointForBeat.y;
+            hasBeatHover = true;
+          }
+
+          const beatRadius = Math.max(24, Number(params.hoverRadius) || 120);
+
+          if (params.hoverRevealMode) {
+            const hoverPoint = getHoverPointOnCloudPlane();
+            if (hoverPoint) {
+              if (
+                pointerPressed &&
+                Math.abs(hoverPoint.x) <= cloudHalfW &&
+                Math.abs(hoverPoint.y) <= cloudHalfH
+              ) {
+                hoverX = hoverPoint.x;
+                hoverY = hoverPoint.y;
+                hasHover = true;
+              }
+            }
+
+            const outerRadius = Math.max(1, params.hoverRadius);
+            const innerRadius =
+              outerRadius * (1 - clamp01(params.hoverSoftness));
+
+            for (let i = 0; i < count; i += 1) {
+              const bx = basePositions[i * 3];
+              const by = basePositions[i * 3 + 1];
+
+              let targetZ = 0;
+              if (hasHover) {
+                const distance = Math.hypot(bx - hoverX, by - hoverY);
+                const influence =
+                  1 - smoothstep(innerRadius, outerRadius, distance);
+                targetZ = depthZValues[i] * influence;
+              }
+
+              const easing =
+                targetZ > dynamicZValues[i]
+                  ? params.revealRiseSpeed
+                  : params.revealFallSpeed;
+              dynamicZValues[i] +=
+                (targetZ - dynamicZValues[i]) * clamp01(easing);
+
+              const wave = hasJitter
+                ? 0.5 + 0.5 * Math.sin(t + jitterPhases[i])
+                : 0;
+              const jx = hasJitter
+                ? jitterDirections[i * 3] * amount * wave
+                : 0;
+              const jy = hasJitter
+                ? jitterDirections[i * 3 + 1] * amount * wave
+                : 0;
+              const jz = hasJitter
+                ? jitterDirections[i * 3 + 2] * amount * wave
+                : 0;
+              let beatZ = 0;
+              if (hasBeatHover && beatAmount > 0.001) {
+                const beatDistance = Math.hypot(
+                  bx - beatHoverX,
+                  by - beatHoverY,
+                );
+                const beatInfluence =
+                  1 - smoothstep(0, beatRadius, beatDistance);
+                beatZ =
+                  beatInfluence *
+                  beatAmount *
+                  (Number(params.beatDepthBoost) || 0);
+              }
+
+              pos[i * 3] = bx + jx;
+              pos[i * 3 + 1] = by + jy;
+              pos[i * 3 + 2] = dynamicZValues[i] + jz + beatZ;
+            }
+          } else {
+            for (let i = 0; i < count; i += 1) {
+              const bx = basePositions[i * 3];
+              const by = basePositions[i * 3 + 1];
+              const targetZ = depthZValues[i];
+              const easing =
+                targetZ > dynamicZValues[i]
+                  ? params.revealRiseSpeed
+                  : params.revealFallSpeed;
+              dynamicZValues[i] +=
+                (targetZ - dynamicZValues[i]) * clamp01(easing);
+
+              const wave = hasJitter
+                ? 0.5 + 0.5 * Math.sin(t + jitterPhases[i])
+                : 0;
+              const jx = hasJitter
+                ? jitterDirections[i * 3] * amount * wave
+                : 0;
+              const jy = hasJitter
+                ? jitterDirections[i * 3 + 1] * amount * wave
+                : 0;
+              const jz = hasJitter
+                ? jitterDirections[i * 3 + 2] * amount * wave
+                : 0;
+              let beatZ = 0;
+              if (hasBeatHover && beatAmount > 0.001) {
+                const beatDistance = Math.hypot(
+                  bx - beatHoverX,
+                  by - beatHoverY,
+                );
+                const beatInfluence =
+                  1 - smoothstep(0, beatRadius, beatDistance);
+                beatZ =
+                  beatInfluence *
+                  beatAmount *
+                  (Number(params.beatDepthBoost) || 0);
+              }
+
+              pos[i * 3] = bx + jx;
+              pos[i * 3 + 1] = by + jy;
+              pos[i * 3 + 2] = dynamicZValues[i] + jz + beatZ;
+            }
+          }
+
+          points.geometry.attributes.position.needsUpdate = true;
+        }
+
+        controls.update();
+        renderer.render(scene, camera);
+      });
+    </script>
+
+    <!-- React Chopsticks UI -->
+    <div id="chopsticks-root"></div>
+
+    <!-- React & ReactDOM from CDN -->
+    <script
+      crossorigin
+      src="https://unpkg.com/react@18/umd/react.production.min.js"
+    ></script>
+    <script
+      crossorigin
+      src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"
+    ></script>
+
+    <!-- Chopsticks React Application -->
+    <script src="./scripts/chopsticks-react.js"></script>
+  </body>
+</html>
